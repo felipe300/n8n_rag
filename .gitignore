@@ -1,0 +1,10 @@
+# Seguridad
+.env
+
+# Datos persistentes de Docker
+n8n_data/
+output/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db

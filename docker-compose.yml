@@ -1,0 +1,18 @@
+services:
+  n8n:
+    image: n8nio/n8n
+    container_name: n8n-rag
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./chocolatech-inmersion-g10:/home/node/chocolate
+      - ./output:/home/node/output
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
+      - N8N_BLOCK_WRITE_ACCESS=false
+
+volumes:
+  n8n_data:
