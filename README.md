@@ -38,8 +38,8 @@ Está especialmente diseñado para el sector educativo, permitiendo que docentes
 1. **Clonar el Repositorio**:
 
 ```bash
-git clone <url-de-tu-repo>
-cd <nombre-de-la-carpeta>
+git clone https://github.com/felipe300/n8n_rag.git
+cd n8n_rag
 ```
 
 2. **Configura tus variables de entorno**
