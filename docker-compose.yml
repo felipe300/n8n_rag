@@ -2,17 +2,71 @@ services:
   n8n:
     image: n8nio/n8n
     container_name: n8n-rag
+    restart: unless-stopped
     ports:
       - "5678:5678"
-    volumes:
-      - n8n_data:/home/node/.n8n
-      - ./chocolatech-inmersion-g10:/home/node/chocolate
-      - ./output:/home/node/output
     environment:
+      - TZ=America/Santiago
+      - GENERIC_TIMEZONE=America/Santiago
+
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
+
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+
       - N8N_BLOCK_WRITE_ACCESS=false
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./chocolatech-inmersion-g10:/data/docs
+      - ./output:/data/output
+
+    networks:
+      - n8n-network
+
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+
+  mysql-db:
+    image: mysql:8.0
+    container_name: mysql-rag
+    restart: unless-stopped
+    environment:
+      - TZ=America/Santiago
+
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+
+    expose:
+      - "3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./assets:/docker-entrypoint-initdb.d
+    networks:
+      - n8n-network
+  adminer:
+    image: adminer
+    container_name: adminer-rag
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    networks:
+      - n8n-network
 
 volumes:
   n8n_data:
+  mysql_data:
+
+networks:
+  n8n-network:
