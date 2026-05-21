@@ -8,28 +8,37 @@ services:
     environment:
       - TZ=America/Santiago
       - GENERIC_TIMEZONE=America/Santiago
-
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
-
-      - N8N_HOST=localhost
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-
       - N8N_BLOCK_WRITE_ACCESS=false
-
+      - WEBHOOK_URL=https://quarters-mundane-clerical.ngrok-free.dev/
     volumes:
       - n8n_data:/home/node/.n8n
       - ./chocolatech-inmersion-g10:/data/docs
       - ./output:/data/output
-
     networks:
       - n8n-network
-
     depends_on:
       mysql-db:
         condition: service_healthy
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok-rag
+    restart: unless-stopped
+    command:
+      - "http"
+      - "n8n-rag:5678"
+      - "--url=quarters-mundane-clerical.ngrok-free.dev"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+    networks:
+      - n8n-network
+    depends_on:
+      - n8n
 
   mysql-db:
     image: mysql:8.0
@@ -37,12 +46,10 @@ services:
     restart: unless-stopped
     environment:
       - TZ=America/Santiago
-
       - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-
     expose:
       - "3306"
     healthcheck:
@@ -55,12 +62,24 @@ services:
       - ./assets:/docker-entrypoint-initdb.d
     networks:
       - n8n-network
+
   adminer:
     image: adminer
     container_name: adminer-rag
     restart: unless-stopped
     ports:
       - "8080:8080"
+    networks:
+      - n8n-network
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle-rag
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8888:8080"
     networks:
       - n8n-network
 

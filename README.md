@@ -16,9 +16,12 @@ Está especialmente diseñado para el sector educativo, permitiendo que docentes
 
 ## Requisitos Previos
 
-- Docker y Docker Compose instalados.
-- n8n (versión con nodos de IA habilitados).
-- API Key de Cohere (puedes obtener una gratuita en [Cohere](https:www.cohere.com)).
+Antes de empezar, asegúrate de tener instalado y configurado:
+
+- [Docker y Docker Compose](https://www.docker.com/) instalado en tu sistema.
+- [n8n](https://n8n.io) mira la documentación, para resolver tus dudas o cambiar a un plan online.
+- Una cuenta en [Cohere](https://www.cohere.com) para obtener tu API Key.
+- Un dominio estático gratuito y un Authtoken en [ngrok](https://ngrok.com/) (necesario para que Telegram pueda enviarle mensajes a tu n8n local a través de HTTPS).
 
 ## Estructura del proyecto
 
@@ -47,7 +50,7 @@ cd n8n_rag
 
 2. **Configura tus variables de entorno**
 
-Copia el archivo y edita el archivo `.env`. La API Key de Cohere se agrega directamente en el nodo de n8n.
+Copia el archivo y edita el archivo `.env`. La API Key de Cohere se agrega directamente en el nodo de n8n. Sin embargo, debes agregar el `AUTHTOKEN` de Ngrok acá.
 
 ```bash
 cp .env.example .env
@@ -70,7 +73,7 @@ docker compose down
 No necesitas instalar programas externos. Abre tu navegador en `http://localhost:8080` para acceder a **Adminer** e ingresa con estos datos para explorar tus tablas estructuradas:
 
 - **Sistema**: `MySQL`
-- **Servidor**: `mysql-db`
+- **Servidor**: `mysql-rag` (`o mysql-db`)
 - **Usuario**: El valor de tu `${MYSQL_USER}` (ej. `n8n_user`)
 - **Contraseña**: El valor de tu `${MYSQL_PASSWORD}`
 - **Base de datos**: El valor de tu `${MYSQL_DATABASE}` (ej. `n8n_db)`
@@ -79,6 +82,14 @@ No necesitas instalar programas externos. Abre tu navegador en `http://localhost
 
 Abre tu navegador en `http://localhost:5678` e inicia sesión con las credenciales que definiste en tu archivo `.env` (`N8N_USER` y `N8N_PASSWORD`).
 
+6. **Monitoreo de Contenedores en Tiempo Real (Dozzle)**
+
+Si quieres ver qué está pasando "bajo el capó" (monitorear los logs de n8n, las consultas que llegan a MySQL o el estado del túnel de ngrok) sin tener que usar la terminal, abre:
+
+- **URL:** `http://localhost:8888`
+
+Desde esta interfaz web ligera podrás seguir en tiempo real las interacciones y respuestas de tu Agente de IA.
+
 ## Arquitectura del Agente
 
 En entornos locales, la ejecución de los flujos pueden tomar más tiempo.
@@ -86,36 +97,38 @@ En entornos locales, la ejecución de los flujos pueden tomar más tiempo.
 El agente de n8n procesa la información de los colaboradores dividiendo el conocimiento en dos grandes vertientes operadas por el modelo `command-r` de Cohere:
 
 ```text
-                                 │
-                                 ▼
-                           ┌───────────┐
-                           │ AI Agent  │ ◄─── (Memoria de Sesión)
-                           └─────┬─────┘
-                                 │
-         ┌───────────────────────┴───────────────────────┐
-         ▼                                               ▼
-[¿Es una duda general/reglamentos?]           [¿Es una duda de sus datos/saldos?]
-         │                                               │
-         ▼                                               ▼
-┌──────────────────┐                           ┌──────────────────┐
-│  Vector Store    │                           │   Custom Tool    │
-│  Tool (RAG)      │                           │  (MySQL Host:    │
-│ (Qdrant/Pinecone)│                           │   `mysql-db`)    │
-└────────┬─────────┘                           └────────┬─────────┘
-         │                                               │
-         └───────────────────────┬───────────────────────┘
-                                 │ (Retorna Información)
-                                 ▼
-                       ┌──────────────────┐
-                       │ Respuesta Final  │ (Personalizada en Lenguaje Natural)
-                       └──────────────────┘
+                                         │
+                                         ▼
+                                   ┌───────────┐
+                                   │ AI Agent  │ ◄─── (Memoria de Sesión)
+                                   └─────┬─────┘
+                                         │
+                 ┌───────────────────────┴───────────────────────┐
+                 ▼                                               ▼
+    [¿Es una duda general/reglamentos?]           [¿Es una duda de sus datos/saldos?]
+                 │                                               │
+                 ▼                                               ▼
+        ┌──────────────────┐                           ┌──────────────────┐
+        │  Vector Store    │                           │   Custom Tool    │
+        │  Tool (RAG)      │                           │  (MySQL Host:    │
+        │  (In-Memory)     │                           │   `mysql-rag`)   │
+        └────────┬─────────┘                           └────────┬─────────┘
+                 │                                               │
+                 └───────────────────────┬───────────────────────┘
+                                         │ (Retorna Información)
+                                         ▼
+                               ┌──────────────────┐
+                               │ Respuesta Final  │ (Personalizada en Lenguaje Natural)
+                               └──────────────────┘
 ```
+
+> ⚠️ **Nota importante sobre la Base Vectorial:** Este proyecto utiliza el nodo **In-Memory Vector Store** de n8n para simplificar el despliegue local. Esto significa que los embeddings de los documentos se guardan directamente en la memoria RAM del contenedor de n8n. **Si reinicias o detienes los contenedores (`docker compose down`), la memoria se vaciará** y deberás ejecutar el _Flujo de Ingestión_ una vez más para volver a entrenar al agente.
 
 El flujo de trabajo se divide en dos fases críticas:
 
 1. **Flujo de Ingestión (Load Data Flow)**
 
-Se encarga de leer los archivos de la carpeta `./chocolatech-inmersion-g10`, dividirlos en fragmentos manejables y generar los embeddings multilingües con Cohere para guardarlos en una base de datos vectorial (Vector Store).
+Se encarga de leer los archivos planos de la carpeta `./chocolatech-inmersion-g10` (mapeada dentro del contenedor en `/data/docs`), dividirlos en fragmentos semánticos (`chunks`) y generar embeddings multilingües mediante Cohere para almacenarlos temporalmente en la **memoria volátil (In-Memory)** de n8n.
 
 ![Flujo de ingestion](./assets/n8n_rag_flow_01.png)
 
@@ -133,6 +146,14 @@ Ahora el usuario debe dar su nombre y sólo consultar los datos acordes a su per
 
 ![Flow 03](./assets/n8n_rag_flow_03.png)
 
+4. **Integración con Telegram**
+
+Para llevar el agente al usuario final, el flujo se conecta directamente con la API de Bots de Telegram mediante el nodo **Telegram Trigger**.
+
+Gracias al túnel HTTPS expuesto de forma segura por **ngrok**, n8n recibe en tiempo real los mensajes que los empleados envían al bot. El agente procesa la intención, extrae el contexto (ya sea desde MySQL o desde la base vectorial en memoria) y le responde al usuario directamente en su chat de Telegram en cuestión de segundos, convirtiendo un backend complejo en una experiencia de chat natural y accesible desde cualquier dispositivo móvil.
+
+![Integración con Telegram](./assets/n8n_rag_flow_04.png)
+
 Nuevo prompt:
 
 ```text
@@ -149,6 +170,25 @@ REGLAS:
     Si no se encuentra: no inventes datos personales. Responde solo con base en las políticas generales de RR. HH. del Vector Store.
     Usa la base de conocimientos para dudas generales."
 ```
+
+## Solución de Problemas Frecuentes (Troubleshooting)
+
+Al desarrollar y probar este agente de IA en un entorno local, es normal encontrarse con ciertos desafíos de conectividad con las APIs externas de Telegram. Aquí se detallan los dos problemas principales identificados y cómo manejarlos:
+
+1. **El desafío de los Webhooks en Entorno Local (Exposición de Puertos)**
+
+- **Problema:** Telegram requiere obligatoriamente una URL pública segura (`https://`) para poder enviar los mensajes de los usuarios a tu servidor. Al ejecutar n8n en `localhost`, la API de Telegram no tiene forma de comunicarse con tu máquina.
+
+- **Solución implementada:** Se integró **ngrok** directamente como un servicio en el archivo `docker-compose.yml`. Este contenedor genera un túnel seguro y expone una URL pública estática (definida en la variable `WEBHOOK_URL` de n8n). Asegúrate siempre de que tu token de ngrok esté activo en el archivo `.env` y que la URL coincida con tu dominio asignado en el dashboard de ngrok.
+
+2. **Conflicto de Webhooks al Publicar el Flujo (Test URL vs. Production URL)**
+
+- **Problema:** En n8n, cuando estás editando un flujo y usas el nodo _Telegram Trigger_, n8n registra en Telegram una **Test URL** (terminada en `/webhook-test/...`). Sin embargo, si haces clic en el botón **"Publish"** (Activar flujo), n8n intenta registrar una **Production URL** (terminada en `/webhook/...`). Como la URL del webhook de ngrok está fija (hardcodeada) en las variables de entorno del contenedor para apuntar a producción, alternar entre el modo de pruebas y producción causa que Telegram se confunda, deje de responder o arroje errores de registro de webhook.
+
+- **Soluciones y Buenas Prácticas:**
+  - **Trabajar en modo Test (Recomendado para desarrollo):** Mientras estés modificando el prompt, ajustando el SQL o editando los nodos, **no actives el botón de Publish**. Deja el flujo desactivado y utiliza el botón **"Listen for test event"** en n8n para enviar mensajes de prueba desde Telegram.
+  - **Fijar la URL de producción manualmente:** Si vas a dejar el bot encendido en modo producción (botón _Publish_ activo), asegúrate de guardar los cambios, activar el interruptor y enviar un mensaje. Si el bot deja de responder, entra al nodo de Telegram en n8n, desconéctalo un segundo (o vuelve a arrastrar el trigger) y fuerza una ejecución de prueba para que n8n refresque el token del webhook con Telegram.
+  - **Alternativa (Evitar el Hardcodeo):** En futuras versiones, puedes remover la variable `WEBHOOK_URL` del `docker-compose.yml` y configurar n8n detrás de un proxy inverso dinámico o automatizar el refresco de la URL mediante la API de n8n.
 
 ## Enlaces de Interés
 
